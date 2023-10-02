@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"slices"
 	"sync"
+	"sync/atomic"
 )
 
 // Topic implements a buffered channel with dynamic fanout.
@@ -35,6 +36,9 @@ type Topic[T any] struct {
 
 	// receivers is the list of all receivers for the topic.
 	receivers []*Receiver[T]
+
+	// recentValue holds the latest value sent to the topic.
+	recentValue atomic.Value
 }
 
 type Receiver[T any] struct {
@@ -139,6 +143,7 @@ func (t *Topic[T]) goDispatch() {
 				for _, r := range t.receivers {
 					r.add(v)
 				}
+				t.recentValue.Store(v)
 			}
 
 		case 2: // <-t.subscribeCh
