@@ -21,7 +21,7 @@ func TestTopic(t *testing.T) {
 	for i := 0; i < numMembers; i++ {
 		i := i
 
-		m, receiveCh, err := topic.Subscribe()
+		m, receiveCh, err := topic.Subscribe(0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -47,7 +47,69 @@ func TestTopic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, _, err := topic.Subscribe(); !errors.Is(err, os.ErrClosed) {
+	if _, _, err := topic.Subscribe(0); !errors.Is(err, os.ErrClosed) {
 		t.Fatalf("want os.ErrClosed, got %v", err)
+	}
+}
+
+func TestEmptyTopic(t *testing.T) {
+	topic := New[int64]()
+	defer topic.Close()
+
+	numMsgs := 5
+	for i := 0; i < numMsgs; i++ {
+		topic.SendCh() <- rand.Int63()
+	}
+}
+
+func TestQueueLimitRecent(t *testing.T) {
+	topic := New[int]()
+	defer topic.Close()
+
+	sub, subCh, err := topic.Subscribe(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Unsubscribe()
+
+	numMsgs := 5
+	for i := 1; i <= numMsgs; i++ {
+		topic.SendCh() <- i
+	}
+
+	if v := <-subCh; v != numMsgs {
+		t.Fatalf("want %d, got %d", numMsgs, v)
+	}
+
+	sub.Unsubscribe()
+
+	if v := <-subCh; v != 0 {
+		t.Fatalf("want 0, got %d", v)
+	}
+}
+
+func TestQueueLimitOldest(t *testing.T) {
+	topic := New[int]()
+	defer topic.Close()
+
+	sub, subCh, err := topic.Subscribe(-1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Unsubscribe()
+
+	numMsgs := 5
+	for i := 1; i <= numMsgs; i++ {
+		topic.SendCh() <- i
+	}
+
+	if v := <-subCh; v != 1 {
+		t.Fatalf("want %d, got %d", 1, v)
+	}
+
+	sub.Unsubscribe()
+
+	if v := <-subCh; v != 0 {
+		t.Fatalf("want 0, got %d", v)
 	}
 }
