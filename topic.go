@@ -52,6 +52,10 @@ type Receiver[T any] struct {
 	// N values and with a -ve limit N, queue holds the oldest N values.
 	limit int
 
+	// includeRecent flag when true begins the receiver with the most recent
+	// message before the receiver is created.
+	includeRecent bool
+
 	// relayCh is the channel where receiver waits to receive messages.
 	relayCh chan T
 
@@ -149,9 +153,13 @@ func (t *Topic[T]) goDispatch() {
 		case 2: // <-t.subscribeCh
 			if recvOK {
 				r := recv.Interface().(*Receiver[T])
+				chsize := 0
 				r.topic = t
-				r.relayCh = make(chan T)
+				r.relayCh = make(chan T, chsize)
 				t.receivers = append(t.receivers, r)
+				if v, ok := Recent(t); ok && r.includeRecent {
+					r.add(v)
+				}
 				r.ok <- struct{}{}
 			}
 
@@ -187,11 +195,14 @@ func (t *Topic[T]) SendCh() chan<- T {
 // Subscribe adds a new receiver to the topic. Maximium number of messages
 // bufferred in the queue is controlled by the limit. A zero limit indicates
 // unbounded queue; with a positive limit N, queue buffers the most recent N
-// messages and with a negative limit N queue buffers the oldest N messages.
-func (t *Topic[T]) Subscribe(limit int) (*Receiver[T], <-chan T, error) {
+// messages and with a negative limit N queue buffers the oldest N
+// messages. When includeRecent flag is true, receiver begins with the last
+// recent message if any.
+func (t *Topic[T]) Subscribe(limit int, includeRecent bool) (*Receiver[T], <-chan T, error) {
 	r := &Receiver[T]{
-		ok:    make(chan struct{}),
-		limit: limit,
+		ok:            make(chan struct{}),
+		limit:         limit,
+		includeRecent: includeRecent,
 	}
 
 	select {

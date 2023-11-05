@@ -21,7 +21,7 @@ func TestTopic(t *testing.T) {
 	for i := 0; i < numMembers; i++ {
 		i := i
 
-		m, receiveCh, err := topic.Subscribe(0)
+		m, receiveCh, err := topic.Subscribe(0, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -47,7 +47,7 @@ func TestTopic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, _, err := topic.Subscribe(0); !errors.Is(err, os.ErrClosed) {
+	if _, _, err := topic.Subscribe(0, false); !errors.Is(err, os.ErrClosed) {
 		t.Fatalf("want os.ErrClosed, got %v", err)
 	}
 }
@@ -66,7 +66,7 @@ func TestQueueLimitRecent(t *testing.T) {
 	topic := New[int]()
 	defer topic.Close()
 
-	sub, subCh, err := topic.Subscribe(1)
+	sub, subCh, err := topic.Subscribe(1, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestQueueLimitOldest(t *testing.T) {
 	topic := New[int]()
 	defer topic.Close()
 
-	sub, subCh, err := topic.Subscribe(-1)
+	sub, subCh, err := topic.Subscribe(-1, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,5 +111,37 @@ func TestQueueLimitOldest(t *testing.T) {
 
 	if v := <-subCh; v != 0 {
 		t.Fatalf("want 0, got %d", v)
+	}
+}
+
+func TestIncludeRecent(t *testing.T) {
+	topic := New[int]()
+	defer topic.Close()
+
+	sub1, sub1Ch, err := topic.Subscribe(0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub1.Unsubscribe()
+
+	for i := 0; i < 5; i++ {
+		topic.SendCh() <- i
+	}
+
+	sub2, sub2Ch, err := topic.Subscribe(0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub2.Unsubscribe()
+
+	for i := 5; i < 10; i++ {
+		topic.SendCh() <- i
+	}
+
+	if v := <-sub1Ch; v != 0 {
+		t.Fatalf("want %d, got %d", 0, v)
+	}
+	if v := <-sub2Ch; v != 4 {
+		t.Fatalf("want %d, got %d", 4, v)
 	}
 }
