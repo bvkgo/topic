@@ -181,6 +181,16 @@ func (t *Topic[T]) goDispatch() {
 	}
 }
 
+// Send publishes a value to the topic. Returns false if topic was closed.
+func (t *Topic[T]) Send(v T) bool {
+	select {
+	case <-t.closeCtx.Done():
+		return false
+	case t.sendCh <- v:
+		return true
+	}
+}
+
 // SendCh returns a channel for the Topic where users can send messages.
 // topic in other select clauses. Returns nil if topic is closed.
 func (t *Topic[T]) SendCh() chan<- T {
