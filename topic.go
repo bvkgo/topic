@@ -61,7 +61,7 @@ type Receiver[T any] struct {
 
 	// queue holds zero or more incoming messages not yet received by this
 	// receiver.
-	queue []T
+	queue []reflect.Value
 }
 
 // New creates a new topic.
@@ -125,7 +125,7 @@ func (t *Topic[T]) goDispatch() {
 			}
 			if len(r.queue) > 0 {
 				relayCase.Chan = reflect.ValueOf(r.relayCh)
-				relayCase.Send = reflect.ValueOf(r.queue[0])
+				relayCase.Send = r.queue[0]
 			}
 			pending = append(pending, relayCase)
 		}
@@ -145,7 +145,7 @@ func (t *Topic[T]) goDispatch() {
 			if recvOK {
 				v := recv.Interface().(T)
 				for _, r := range t.receivers {
-					r.add(v)
+					r.add(recv)
 				}
 				t.recentValue.Store(v)
 			}
@@ -158,7 +158,7 @@ func (t *Topic[T]) goDispatch() {
 				r.relayCh = make(chan T, chsize)
 				t.receivers = append(t.receivers, r)
 				if v, ok := Recent(t); ok && r.includeRecent {
-					r.add(v)
+					r.add(reflect.ValueOf(v))
 				}
 				r.ok <- struct{}{}
 			}
@@ -241,9 +241,9 @@ func (r *Receiver[T]) Unsubscribe() {
 	}
 }
 
-func (r *Receiver[T]) add(v T) {
+func (r *Receiver[T]) add(v reflect.Value) {
 	if len(r.queue) == 0 {
-		if reflect.ValueOf(r.relayCh).TrySend(reflect.ValueOf(v)) {
+		if reflect.ValueOf(r.relayCh).TrySend(v) {
 			return
 		}
 	}
@@ -272,7 +272,7 @@ func (r *Receiver[T]) add(v T) {
 	}
 }
 
-func (r *Receiver[T]) remove() T {
+func (r *Receiver[T]) remove() reflect.Value {
 	v := r.queue[0]
 	r.queue = slices.Delete(r.queue, 0, 1)
 	return v
