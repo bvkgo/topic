@@ -92,7 +92,7 @@ func (t *Topic[T]) goDispatch() {
 	defer t.wg.Done()
 
 	for {
-		var pending []reflect.SelectCase
+		pending := make([]reflect.SelectCase, 0, len(t.receivers)+4)
 
 		closeCase := reflect.SelectCase{
 			Dir:  reflect.SelectRecv,
