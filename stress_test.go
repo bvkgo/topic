@@ -41,7 +41,7 @@ func TestStress(t *testing.T) {
 	topic.Close()
 }
 
-func BenchmarkDispatch(b *testing.B) {
+func Benchmark1Send1Receive(b *testing.B) {
 	topic := New[int64]()
 	defer topic.Close()
 
@@ -55,6 +55,32 @@ func BenchmarkDispatch(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		topic.Send(rand.Int63())
 		<-rch
+	}
+	b.StopTimer()
+}
+
+func Benchmark1Send10Receives(b *testing.B) {
+	topic := New[int64]()
+	defer topic.Close()
+
+	nreceivers := 10
+	var rchs []<-chan int64
+	for i := 0; i < nreceivers; i++ {
+		recvr, rch, err := topic.Subscribe(0, true /* includeRecent */)
+		if err != nil {
+			b.Fatal(err)
+		}
+		defer recvr.Unsubscribe()
+
+		rchs = append(rchs, rch)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		topic.Send(rand.Int63())
+		for _, rch := range rchs {
+			<-rch
+		}
 	}
 	b.StopTimer()
 }
