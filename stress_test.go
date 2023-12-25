@@ -6,7 +6,6 @@ import (
 	"math/rand"
 	"sync"
 	"testing"
-	"time"
 )
 
 func TestStress(t *testing.T) {
@@ -27,14 +26,8 @@ func TestStress(t *testing.T) {
 		}
 
 		go func(id int) {
-			for stop := false; stop == false; {
-				select {
-				case v := <-rch:
-					// log.Printf("%d: %v", id, v)
-					_ = v
-				case <-time.After(time.Second):
-					stop = true
-				}
+			for v := range rch {
+				_ = v
 			}
 			recvr.Unsubscribe()
 			wg.Done()
@@ -44,4 +37,24 @@ func TestStress(t *testing.T) {
 	for i := 0; i < numMessages; i++ {
 		topic.SendCh() <- rand.Int63()
 	}
+
+	topic.Close()
+}
+
+func BenchmarkDispatch(b *testing.B) {
+	topic := New[int64]()
+	defer topic.Close()
+
+	recvr, rch, err := topic.Subscribe(0, true /* includeRecent */)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer recvr.Unsubscribe()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		topic.Send(rand.Int63())
+		<-rch
+	}
+	b.StopTimer()
 }
