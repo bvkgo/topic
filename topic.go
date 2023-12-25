@@ -91,8 +91,17 @@ func (t *Topic[T]) Close() error {
 func (t *Topic[T]) goDispatch() {
 	defer t.wg.Done()
 
+	nreceivers := len(t.receivers)
+	pending := make([]reflect.SelectCase, 0, nreceivers+4)
+
 	for {
-		pending := make([]reflect.SelectCase, 0, len(t.receivers)+4)
+
+		if n := len(t.receivers); n != nreceivers {
+			nreceivers = n
+			pending = make([]reflect.SelectCase, 0, nreceivers+4)
+		} else {
+			pending = pending[:0]
+		}
 
 		closeCase := reflect.SelectCase{
 			Dir:  reflect.SelectRecv,
