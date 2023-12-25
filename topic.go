@@ -242,6 +242,12 @@ func (r *Receiver[T]) Unsubscribe() {
 }
 
 func (r *Receiver[T]) add(v T) {
+	if len(r.queue) == 0 {
+		if reflect.ValueOf(r.relayCh).TrySend(reflect.ValueOf(v)) {
+			return
+		}
+	}
+
 	if r.limit == 0 {
 		r.queue = append(r.queue, v)
 		return
