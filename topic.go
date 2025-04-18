@@ -1,9 +1,14 @@
 // Copyright (c) 2023 BVK Chaitanya
 
-// Package topic implements a buffered channel with dynamic fanout size. Unlike
-// the normal Go channels, messages sent to a Topic are duplicated to all
-// receivers. Incoming messages are queued in-memory when a receiver is not
-// ready. Users can add/remove receivers from a topic dynamically.
+// Package topic implements a generic, buffering publish-subscribe messaging
+// system with dynamic fanout.
+//
+// Messages sent to a Topic are duplicated and delivered to all subscribed
+// receivers. Incoming messages are queued in-memory when receivers are not
+// ready, with configurable buffering behavior per receiver. Receivers can be
+// added or removed dynamically, and the most recent message can be queried.
+//
+// The Topic type is safe for concurrent use by multiple goroutines.
 package topic
 
 import (
@@ -15,7 +20,10 @@ import (
 	"sync/atomic"
 )
 
-// Topic implements a buffered channel with dynamic fanout.
+// Topic represents a publish-subscribe channel that duplicates messages to all
+// subscribed receivers. Messages are queued in-memory for slow receivers, and
+// the buffering behavior is configured per receiver via Subscribe. Topics are
+// created with New and support generic message types.
 type Topic[T any] struct {
 	// closeCtx and closeCause are used to cancel background tasks when topic is
 	// closed.
@@ -41,6 +49,8 @@ type Topic[T any] struct {
 	recentValue atomic.Value
 }
 
+// Receiver represents a subscriber to a Topic. It provides methods to manage
+// subscription lifecycle, such as unsubscribing from the Topic.
 type Receiver[T any] struct {
 	topic *Topic[T]
 
@@ -64,7 +74,14 @@ type Receiver[T any] struct {
 	queue []reflect.Value
 }
 
-// New creates a new topic.
+// New creates a new Topic for messages of type T. The returned Topic is ready
+// to accept messages via Send/SendCh and subscribers via Subscribe.
+//
+// Example:
+//
+//	topic := topic.New[string]()
+//	ch := topic.SendCh()
+//	ch <- "Hello, world!"
 func New[T any]() *Topic[T] {
 	ctx, cause := context.WithCancelCause(context.Background())
 	t := &Topic[T]{
@@ -79,9 +96,16 @@ func New[T any]() *Topic[T] {
 	return t
 }
 
-// Close destroys the topic. Blocking operations will return with os.ErrClosed
-// error. All receivers are forcibly unsubscribed. Caller is blocked till all
-// background goroutines complete.
+// Close shuts down the Topic, closing all subscriber channels and preventing
+// further subscriptions or message sends. After closing, SendCh will panic,
+// Subscribe will return an error, and Recent may return false. Close is
+// idempotent; multiple calls have no additional effect.
+//
+// Example:
+//
+//	topic := topic.New[float64]()
+//	err := topic.Close()
+//	if err != nil { /* handle error */ }
 func (t *Topic[T]) Close() error {
 	t.closeCause(os.ErrClosed)
 	t.wg.Wait()
@@ -190,7 +214,16 @@ func (t *Topic[T]) goDispatch() {
 	}
 }
 
-// Send publishes a value to the topic. Returns false if topic was closed.
+// Send publishes a message directly to the Topic. The message is duplicated
+// and delivered to all subscribed receivers. If the Topic is closed, Send
+// returns false.
+//
+// Example:
+//
+//	topic := topic.New[int]()
+//	if closed := topic.Send(42); closed {
+//		/* handle error */
+//	}
 func (t *Topic[T]) Send(v T) bool {
 	select {
 	case <-t.closeCtx.Done():
@@ -200,8 +233,15 @@ func (t *Topic[T]) Send(v T) bool {
 	}
 }
 
-// SendCh returns a channel for the Topic where users can send messages.
-// topic in other select clauses. Returns nil if topic is closed.
+// SendCh returns a send-only channel for publishing messages to the Topic.
+// Messages sent to this channel are duplicated and delivered to all subscribed
+// receivers. If the Topic is closed, sending to the channel will panic.
+//
+// Example:
+//
+//	topic := topic.New[int]()
+//	ch := topic.SendCh()
+//	ch <- 42
 func (t *Topic[T]) SendCh() chan<- T {
 	select {
 	case <-t.closeCtx.Done():
@@ -211,12 +251,25 @@ func (t *Topic[T]) SendCh() chan<- T {
 	}
 }
 
-// Subscribe adds a new receiver to the topic. Maximium number of messages
-// bufferred in the queue is controlled by the limit. A zero limit indicates
-// unbounded queue; with a positive limit N, queue buffers the most recent N
-// messages and with a negative limit N queue buffers the oldest N
-// messages. When includeRecent flag is true, receiver begins with the last
-// recent message if any.
+// Subscribe adds a new receiver to the Topic, returning a Receiver and a
+// receive-only channel for consuming messages. The limit parameter controls
+// the receiver's queue behavior:
+//
+//   - limit == 0: Unbounded queue, buffering all messages (memory-limited).
+//   - limit > 0: Buffers the most recent limit messages, discarding older ones if full.
+//   - limit < 0: Buffers the oldest |limit| messages, discarding newer ones if full.
+//
+// If the Topic is closed, Subscribe returns an error. The returned channel is
+// closed when the receiver unsubscribes or the Topic is closed.
+//
+// Example:
+//
+//	topic := topic.New[string]()
+//	receiver, ch, err := topic.Subscribe(5, false /* includeRecent */) // Buffer up to 5 recent messages
+//	if err != nil { /* handle error */ }
+//	for msg := range ch {
+//	    fmt.Println(msg)
+//	}
 func (t *Topic[T]) Subscribe(limit int, includeRecent bool) (*Receiver[T], <-chan T, error) {
 	r := &Receiver[T]{
 		ok:            make(chan struct{}),
@@ -233,8 +286,16 @@ func (t *Topic[T]) Subscribe(limit int, includeRecent bool) (*Receiver[T], <-cha
 	}
 }
 
-// Unsubscribe removes a receiver from a topic. Buffered messages that were not
-// yet received will be discarded.
+// Unsubscribe removes the receiver from the Topic, closing its associated
+// receive-only channel. Pending messages in the receiver's queue are
+// discarded.  Unsubscribe is idempotent; multiple calls have no effect. After
+// unsubscribing, the receiver cannot be reused.
+//
+// Example:
+//
+//	topic := topic.New[bool]()
+//	receiver, _, _ := topic.Subscribe(0)
+//	receiver.Unsubscribe()
 func (r *Receiver[T]) Unsubscribe() {
 	if r.topic == nil {
 		return
